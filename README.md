@@ -1,71 +1,97 @@
-# Getting Started with Create React App
+pipeline {
+    agent any
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
 
-## Available Scripts
+    environment {
+        SCANNER_HOME = tool 'mysonar'
+    }
 
-In the project directory, you can run:
+    stages {
+        stage('Clean WS') {
+            steps {
+                cleanWs()
+            }
+        }
 
-### `npm start`
+        stage('Code Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/DurgaPrasadSonti/Zomato-Repo-Docker-Project-.git'
+            }
+        }
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+        stage('CQA') {
+            steps {
+                withSonarQubeEnv('mysonar') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
+                }
+            }
+        }
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+        stage('Quality Gates') {
+            steps {
+                script {
+                    waitForQualityGate(
+                        abortPipeline: false,
+                        credentialsId: 'sonar-token'
+                    )
+                }
+            }
+        }
 
-### `npm test`
+        stage('Build') {
+            steps {
+                sh 'npm install'
+            }
+        }
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+        stage('OWASP') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
 
-### `npm run build`
+        stage('Dockerfile') {
+            steps {
+                sh 'docker build -t durgaprasad19982001/sonti:zomato .'
+            }
+        }
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+        stage('trivy file') {
+            steps {
+                sh 'trivy fs . > trivy.txt'
+            }
+        }
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+        stage('ImageScan') {
+            steps {
+                sh 'trivy image durgaprasad19982001/sonti:zomato'
+            }
+        }
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+        stage('DockerPush') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        sh 'docker push durgaprasad19982001/sonti:zomato'
+                    }
+                }
+            }
+        }
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
-# Zomato-Clone
+        stage('Container') {
+            steps {
+                sh 'docker run -itd --name zomato -p 3000:3000 durgaprasad19982001/sonti:zomato'
+            }
+        }
+    }
+}
